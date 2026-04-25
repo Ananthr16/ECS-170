@@ -1,0 +1,8 @@
+.venv/
+.venv311arm/
+.venv313/
+__pycache__/
+*.pyc
+.DS_Store
+ECS170_Spring_2026_Source_Code_Template/data/stage_2_data/train.csv
+ECS170_Spring_2026_Source_Code_Template/data/stage_2_data/test.csv
