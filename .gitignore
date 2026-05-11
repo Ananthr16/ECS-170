@@ -6,3 +6,11 @@ __pycache__/
 .DS_Store
 ECS170_Spring_2026_Source_Code_Template/data/stage_2_data/train.csv
 ECS170_Spring_2026_Source_Code_Template/data/stage_2_data/test.csv
+
+# Stage 3 instructor pickles (large; distribute via course / Drive — exceeds GitHub single-file limits)
+ECS170_Spring_2026_Source_Code_Template/data/stage_3_data-2/MNIST
+ECS170_Spring_2026_Source_Code_Template/data/stage_3_data-2/CIFAR
+ECS170_Spring_2026_Source_Code_Template/data/stage_3_data-2/ORL
+
+# Optional: smoke-test artifacts from dev
+ECS170_Spring_2026_Source_Code_Template/result/stage_3_result/_smoke*

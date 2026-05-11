@@ -8,65 +8,115 @@ import numpy as np
 
 class Method_MLP(method, nn.Module):
     data = None
-    max_epoch = 1250
+    max_epoch = 100
     learning_rate = 1e-3
+    batch_size = 256
+    weight_decay = 1e-4
+    dropout_p = 0.1
+    label_smoothing = 0.05
 
     def __init__(self, mName, mDescription):
         method.__init__(self, mName, mDescription)
         nn.Module.__init__(self)
 
-        self.fc_layer_1 = nn.Linear(784, 128)
-        self.activation_func_1 = nn.ReLU()
-        self.fc_layer_2 = nn.Linear(128, 64)
-        self.activation_func_2 = nn.ReLU()
-        self.fc_layer_3 = nn.Linear(64, 10)
+        # Deeper MLP: Linear → BatchNorm → ReLU → Dropout (last layer: logits only)
+        self.model = nn.Sequential(
+            nn.Linear(784, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(self.dropout_p),
+            nn.Linear(512, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(self.dropout_p),
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Dropout(self.dropout_p),
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Dropout(self.dropout_p),
+            nn.Linear(128, 10),
+        )
 
     def forward(self, x):
-        h1 = self.activation_func_1(self.fc_layer_1(x))
-        h2 = self.activation_func_2(self.fc_layer_2(h1))
-        y_pred = self.fc_layer_3(h2)
-        return y_pred
+        return self.model(x)
 
-    def train(self, X, y):
-        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    @staticmethod
+    def _pick_device():
+        if torch.cuda.is_available():
+            return torch.device('cuda')
+        if getattr(torch.backends, 'mps', None) is not None and torch.backends.mps.is_available():
+            return torch.device('mps')
+        return torch.device('cpu')
+
+    def fit(self, X, y):
+        device = self._pick_device()
+        print('Using device:', device)
         self.to(device)
 
-        X_tensor = torch.FloatTensor(np.array(X)).to(device)
-        y_tensor = torch.LongTensor(np.array(y)).to(device)
+        X_tensor = torch.FloatTensor(np.asarray(X, dtype=np.float32))
+        y_tensor = torch.LongTensor(np.asarray(y, dtype=np.int64))
 
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        loss_function = nn.CrossEntropyLoss()
+        dataset = torch.utils.data.TensorDataset(X_tensor, y_tensor)
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            drop_last=False,
+        )
+
+        optimizer = torch.optim.AdamW(
+            self.parameters(),
+            lr=self.learning_rate,
+            weight_decay=self.weight_decay,
+        )
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=self.max_epoch
+        )
+        try:
+            loss_function = nn.CrossEntropyLoss(label_smoothing=self.label_smoothing)
+        except TypeError:
+            loss_function = nn.CrossEntropyLoss()
+
         accuracy_evaluator = Evaluate_Accuracy('training evaluator', '')
-
         loss_history = []
         accuracy_history = []
 
         for epoch in range(self.max_epoch):
-            y_pred = self.forward(X_tensor)
-            train_loss = loss_function(y_pred, y_tensor)
+            self.train(True)
+            running_loss = 0.0
+            pred_chunks = []
+            label_chunks = []
 
-            optimizer.zero_grad()
-            train_loss.backward()
-            optimizer.step()
+            for xb, yb in loader:
+                xb = xb.to(device)
+                yb = yb.to(device)
 
-            pred_labels = y_pred.max(1)[1].detach().cpu()
-            true_labels = y_tensor.detach().cpu()
+                optimizer.zero_grad()
+                logits = self.forward(xb)
+                batch_loss = loss_function(logits, yb)
+                batch_loss.backward()
+                optimizer.step()
 
-            accuracy_evaluator.data = {
-                'true_y': true_labels,
-                'pred_y': pred_labels
-            }
+                running_loss += batch_loss.item() * xb.size(0)
+                pred_chunks.append(logits.argmax(dim=1).detach().cpu())
+                label_chunks.append(yb.detach().cpu())
 
-            scores = accuracy_evaluator.evaluate()
+            scheduler.step()
 
-            loss_history.append(train_loss.item())
-            accuracy_history.append(scores['accuracy'])
+            all_pred = torch.cat(pred_chunks).numpy()
+            all_true = torch.cat(label_chunks).numpy()
+            avg_loss = running_loss / len(dataset)
+            train_acc = float((all_pred == all_true).mean())
+            loss_history.append(avg_loss)
+            accuracy_history.append(train_acc)
 
-            print(
-                'Epoch:', epoch,
-                'Accuracy:', scores['accuracy'],
-                'Loss:', train_loss.item()
-            )
+            print('Epoch:', epoch, 'Accuracy:', train_acc, 'Loss:', avg_loss)
+            if epoch % 10 == 0 or epoch == self.max_epoch - 1:
+                accuracy_evaluator.data = {'true_y': all_true, 'pred_y': all_pred}
+                accuracy_evaluator.evaluate()
 
         plt.figure()
         plt.plot(range(self.max_epoch), loss_history, label='Training Loss')
@@ -79,20 +129,21 @@ class Method_MLP(method, nn.Module):
         plt.close()
 
     def test(self, X):
-        device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        device = self._pick_device()
         self.to(device)
+        self.eval()
 
-        X_tensor = torch.FloatTensor(np.array(X)).to(device)
+        X_tensor = torch.FloatTensor(np.asarray(X, dtype=np.float32)).to(device)
 
         with torch.no_grad():
             y_pred = self.forward(X_tensor)
 
-        return y_pred.max(1)[1].detach().cpu()
+        return y_pred.argmax(dim=1).detach().cpu()
 
     def run(self):
         print('method running...')
         print('--start training...')
-        self.train(self.data['train']['X'], self.data['train']['y'])
+        self.fit(self.data['train']['X'], self.data['train']['y'])
 
         print('--start testing...')
         pred_y = self.test(self.data['test']['X'])
