@@ -12,5 +12,8 @@ ECS170_Spring_2026_Source_Code_Template/data/stage_3_data-2/MNIST
 ECS170_Spring_2026_Source_Code_Template/data/stage_3_data-2/CIFAR
 ECS170_Spring_2026_Source_Code_Template/data/stage_3_data-2/ORL
 
+# Stage 4 instructor text datasets (large raw course data)
+ECS170_Spring_2026_Source_Code_Template/data/stage_4_data/
+
 # Optional: smoke-test artifacts from dev
 ECS170_Spring_2026_Source_Code_Template/result/stage_3_result/_smoke*
